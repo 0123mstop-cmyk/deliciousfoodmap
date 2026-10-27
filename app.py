@@ -1,4 +1,5 @@
 
+import html
 import random
 from datetime import date
 
@@ -13,160 +14,235 @@ st.set_page_config(
     layout="wide",
 )
 
-st.title("🍜 오늘 뭐 먹지?")
-st.write("우리 동네 맛집을 찾고 오늘의 추천 메뉴를 확인해 보세요!")
+# ---------- 디자인 ----------
+st.markdown(
+    """
+    <style>
+    .block-container {
+        max-width: 1200px;
+        padding-top: 2rem;
+    }
+    .hero {
+        background: linear-gradient(120deg, #fff1cf, #ffe0cf);
+        padding: 24px;
+        border-radius: 18px;
+        margin-bottom: 20px;
+    }
+    .hero h1 {
+        margin: 0;
+        color: #542d20;
+    }
+    .hero p {
+        color: #754b3d;
+        margin-bottom: 0;
+    }
+    </style>
+    <div class="hero">
+        <h1>🍜 오늘 뭐 먹지?</h1>
+        <p>지도에서 발견하는 우리 동네 맛집</p>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
-# 카카오 REST API 키 읽기
+# ---------- API 키 ----------
 try:
-    KAKAO_KEY = st.secrets["KAKAO_REST_API_KEY"]
+    kakao_key = st.secrets["KAKAO_REST_API_KEY"]
 except Exception:
-    KAKAO_KEY = ""
+    kakao_key = ""
 
-if not KAKAO_KEY:
+if not kakao_key:
     st.error(
         "카카오 REST API 키가 설정되지 않았어요. "
-        "아래 설정 방법을 확인해 주세요."
+        "Streamlit Secrets 설정을 확인해 주세요."
     )
     st.stop()
 
-# 검색할 지역 입력
+# ---------- 검색창 ----------
 with st.form("search_form"):
     area = st.text_input(
-        "📍 어느 지역에서 찾을까요?",
-        placeholder="예: 수원시 영통구, 인하대학교",
+        "📍 검색할 지역",
+        placeholder="예: 인하대학교, 수원시 영통구",
     )
-    submitted = st.form_submit_button("주변 맛집 찾기")
+    keyword = st.selectbox(
+        "🍴 어떤 맛집을 찾을까요?",
+        ["전체 맛집", "한식", "중식", "일식", "양식", "카페", "분식"],
+    )
+    search_button = st.form_submit_button(
+        "🔎 지도에서 맛집 찾기",
+        use_container_width=True,
+    )
 
-# 검색 결과 보관
-if "restaurants" not in st.session_state:
-    st.session_state.restaurants = []
-
-if submitted:
+# ---------- 검색 ----------
+if search_button:
     if not area.strip():
-        st.warning("검색할 지역을 입력해 주세요.")
+        st.warning("먼저 지역을 입력해 줘!")
     else:
+        search_word = "" if keyword == "전체 맛집" else keyword
+        query = f"{area.strip()} {search_word} 맛집".strip()
+
         try:
             response = requests.get(
                 "https://dapi.kakao.com/v2/local/search/keyword.json",
-                headers={
-                    "Authorization": f"KakaoAK {KAKAO_KEY}"
-                },
-                params={
-                    "query": f"{area.strip()} 맛집",
-                    "size": 15,
-                    "page": 1,
-                },
-                timeout=10,
+                headers={"Authorization": f"KakaoAK {kakao_key}"},
+                params={"query": query, "size": 15, "page": 1},
+                timeout=15,
             )
 
             if response.status_code == 200:
-                data = response.json()
-                st.session_state.restaurants = data.get(
-                    "documents", []
-                )
-                st.session_state.area = area.strip()
-                st.session_state.pop("chosen_restaurant", None)
+                results = response.json().get("documents", [])
+                st.session_state["places"] = results
+                st.session_state["search_area"] = area.strip()
+                st.session_state["search_keyword"] = keyword
+                st.session_state.pop("chosen_id", None)
+                st.session_state.pop("reroll_seed", None)
 
-                if not st.session_state.restaurants:
-                    st.info("검색 결과가 없어요. 다른 지역명을 입력해 보세요.")
+                if not results:
+                    st.info("검색 결과가 없어요. 다른 지역을 입력해 봐!")
+
             elif response.status_code == 401:
-                st.error("REST API 키를 확인해 주세요.")
+                st.error("REST API 키가 올바른지 확인해 줘.")
             elif response.status_code == 403:
-                st.error("카카오 로컬 API 사용 설정을 확인해 주세요.")
+                st.error(
+                    "카카오 API 권한 또는 사용 설정을 확인해 줘. "
+                    "카카오 개발자 문서의 오류 안내도 확인해 봐."
+                )
             else:
                 st.error(
-                    f"검색에 실패했어요. 상태 코드: "
-                    f"{response.status_code}"
+                    f"검색 요청에 실패했어. HTTP {response.status_code}"
                 )
 
         except requests.RequestException:
-            st.error("인터넷 연결을 확인하고 다시 시도해 주세요.")
+            st.error("인터넷 연결을 확인하고 다시 시도해 줘.")
 
-restaurants = st.session_state.restaurants
+# ---------- 지도 ----------
+places = st.session_state.get("places", [])
 
-if restaurants:
-    st.subheader(f"📍 {st.session_state.area} 맛집")
-
-    # 날짜가 바뀌면 오늘의 추천도 바뀜
-    today_seed = int(date.today().strftime("%Y%m%d"))
-    daily_restaurant = random.Random(today_seed).choice(restaurants)
-
-    if "chosen_restaurant" not in st.session_state:
-        st.session_state.chosen_restaurant = daily_restaurant
-
-    st.markdown("### 🌟 오늘의 추천 맛집")
-    chosen = st.session_state.chosen_restaurant
-
-    st.subheader(chosen["place_name"])
-    st.write(
-        "주소:",
-        chosen.get("road_address_name")
-        or chosen.get("address_name", "주소 정보 없음"),
+if places:
+    # 날짜와 검색 조건이 같으면 오늘의 추천이 일정하게 유지됨
+    seed_text = (
+        f"{date.today().isoformat()}|"
+        f"{st.session_state.get('search_area', '')}|"
+        f"{st.session_state.get('search_keyword', '')}"
     )
-    st.write("분류:", chosen.get("category_name", "정보 없음"))
-    st.write("전화:", chosen.get("phone") or "전화번호 정보 없음")
+    seed = sum(ord(char) for char in seed_text)
+
+    if "chosen_id" not in st.session_state:
+        st.session_state["chosen_id"] = random.Random(seed).choice(
+            places
+        )["id"]
+
+    chosen = next(
+        (
+            place for place in places
+            if place["id"] == st.session_state["chosen_id"]
+        ),
+        places[0],
+    )
+
+    # 오늘의 추천 카드
+    st.markdown("### ⭐ 오늘의 추천 맛집")
+    st.subheader(f"🍽️ {chosen['place_name']}")
+
+    address = (
+        chosen.get("road_address_name")
+        or chosen.get("address_name")
+        or "주소 정보 없음"
+    )
+    st.write(f"📍 {address}")
+
+    if chosen.get("category_name"):
+        st.caption(chosen["category_name"])
 
     if chosen.get("place_url"):
-        st.link_button("카카오맵에서 보기", chosen["place_url"])
+        st.link_button(
+            "카카오맵에서 가게 보기 ↗",
+            chosen["place_url"],
+        )
 
-    if st.button("🎲 다른 맛집 추천받기"):
-        st.session_state.chosen_restaurant = random.choice(restaurants)
-        st.rerun()
+    if st.button("🎲 다른 맛집 추천", use_container_width=True):
+        alternatives = [
+            place for place in places
+            if place["id"] != chosen["id"]
+        ]
+        if alternatives:
+            st.session_state["chosen_id"] = random.choice(
+                alternatives
+            )["id"]
+            st.rerun()
+        else:
+            st.info("다른 추천을 위해 검색 지역을 바꿔 봐!")
 
     st.divider()
-    st.subheader("🗺️ 맛집 지도")
-
-    first = restaurants[0]
-    map_center = [float(first["y"]), float(first["x"])]
-
-    restaurant_map = folium.Map(
-        location=map_center,
-        zoom_start=14,
+    st.markdown("### 🗺️ 맛집 위치 지도")
+    st.caption(
+        "마커를 누르면 가게 정보가 나와. "
+        "별 모양 마커가 오늘의 추천 맛집이야."
     )
 
-    for place in restaurants:
+    # 지도 중심 좌표
+    center = [float(chosen["y"]), float(chosen["x"])]
+
+    restaurant_map = folium.Map(
+        location=center,
+        zoom_start=15,
+        control_scale=True,
+    )
+
+    # 검색된 맛집을 모두 지도 위에 표시
+    for place in places:
         lat = float(place["y"])
         lon = float(place["x"])
 
-        address = (
+        name = html.escape(place.get("place_name", "이름 없음"))
+        place_address = html.escape(
             place.get("road_address_name")
-            or place.get("address_name", "주소 정보 없음")
+            or place.get("address_name")
+            or "주소 정보 없음"
         )
+        category = html.escape(place.get("category_name", ""))
+        url = html.escape(place.get("place_url", ""), quote=True)
 
         popup_html = (
-            f"<b>{place['place_name']}</b><br>"
-            f"{address}"
+            f"<div style='width:210px'>"
+            f"<b>{name}</b><br>"
+            f"<span>{place_address}</span><br>"
+            f"<small>{category}</small><br>"
         )
+
+        if url:
+            popup_html += (
+                f"<a href='{url}' target='_blank' "
+                f"rel='noopener noreferrer'>카카오맵에서 보기</a>"
+            )
+
+        popup_html += "</div>"
+
+        is_chosen = place["id"] == chosen["id"]
 
         folium.Marker(
             location=[lat, lon],
-            tooltip=place["place_name"],
-            popup=folium.Popup(popup_html, max_width=250),
+            tooltip=(
+                f"⭐ 오늘의 추천: {name}"
+                if is_chosen else name
+            ),
+            popup=folium.Popup(popup_html, max_width=280),
+            icon=folium.Icon(
+                color="orange" if is_chosen else "red",
+                icon="star" if is_chosen else "cutlery",
+                prefix="fa",
+            ),
         ).add_to(restaurant_map)
 
     st_folium(
         restaurant_map,
-        width=None,
-        height=500,
-        key="restaurant_map",
+        use_container_width=True,
+        height=650,
+        key="food_map",
     )
 
-    st.subheader("🍽️ 검색된 맛집 목록")
-
-    for index, place in enumerate(restaurants, start=1):
-        with st.expander(f"{index}. {place['place_name']}"):
-            st.write(
-                place.get("road_address_name")
-                or place.get("address_name", "주소 정보 없음")
-            )
-            st.write(place.get("category_name", "분류 정보 없음"))
-
-            if place.get("phone"):
-                st.write(f"전화: {place['phone']}")
-
-            if place.get("place_url"):
-                st.link_button(
-                    "카카오맵에서 보기",
-                    place["place_url"],
-                    key=f"place_{place['id']}",
-                )
+else:
+    st.info(
+        "👆 위에서 지역을 입력하고 검색하면 "
+        "맛집 위치가 지도에 표시돼!"
+    )
