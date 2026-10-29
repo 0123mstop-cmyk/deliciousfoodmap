@@ -1,7 +1,7 @@
 
 import html
 import random
-from datetime import date, datetime
+from datetime import date
 
 import folium
 import requests
@@ -17,14 +17,8 @@ st.set_page_config(
 
 CATEGORIES = ["전체", "한식", "중식", "일식", "양식", "카페", "분식"]
 
-# 장식용 음식 사진. 실제 해당 식당의 사진은 아님.
-FOOD_IMAGES = [
-    "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=900",
-    "https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?w=900",
-    "https://images.unsplash.com/photo-1555939594-58d7cb561ad1?w=900",
-]
 
-# -------------------- 화면 디자인 --------------------
+# -------------------- 디자인 --------------------
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;800&display=swap');
@@ -39,9 +33,6 @@ html, body, [class*="css"] {
 .block-container {
     max-width: 1500px;
     padding: 1.5rem 2rem 3rem;
-}
-h1, h2, h3 {
-    color: #263b42;
 }
 .brand {
     font-size: 1.65rem;
@@ -80,11 +71,6 @@ h1, h2, h3 {
     color: #6d797b;
     line-height: 1.8;
 }
-.hero-food {
-    font-size: 4.6rem;
-    text-align: center;
-    padding-top: 20px;
-}
 .section-title {
     font-size: 1.2rem;
     font-weight: 800;
@@ -95,11 +81,8 @@ h1, h2, h3 {
     background: white;
     border: 1px solid #f0e8df;
     border-radius: 20px;
-    overflow: hidden;
-    margin-bottom: 14px;
-}
-.pick-inner {
-    padding: 18px 20px;
+    padding: 20px;
+    margin-bottom: 12px;
 }
 .pick-tag {
     color: #e66c50;
@@ -117,13 +100,6 @@ h1, h2, h3 {
     font-size: .9rem;
     line-height: 1.7;
 }
-.info-card {
-    background: white;
-    border: 1px solid #eee8e0;
-    border-radius: 18px;
-    padding: 17px;
-    margin-bottom: 12px;
-}
 .chip {
     display: inline-block;
     padding: 5px 11px;
@@ -133,6 +109,15 @@ h1, h2, h3 {
     border-radius: 20px;
     font-size: .78rem;
     font-weight: 700;
+}
+.photo-placeholder {
+    background: linear-gradient(135deg, #fff0df, #f7eee4);
+    border: 1px dashed #e8cbb5;
+    border-radius: 16px;
+    min-height: 150px;
+    padding: 25px 12px;
+    text-align: center;
+    color: #8b7770;
 }
 div.stButton > button,
 div.stFormSubmitButton > button,
@@ -150,23 +135,8 @@ div.stFormSubmitButton > button[kind="primary"] {
 div[data-testid="stTextInput"] input {
     border-radius: 12px;
 }
-div[data-testid="stRadio"] label {
-    background: #fff;
-    border-radius: 20px;
-}
-div[data-testid="stVerticalBlockBorderWrapper"] {
-    border-radius: 18px;
-}
 hr {
     border-color: #eee8e0;
-}
-@media (max-width: 700px) {
-    .block-container {
-        padding: 1rem .7rem;
-    }
-    .hero-title {
-        font-size: 1.5rem;
-    }
 }
 </style>
 """, unsafe_allow_html=True)
@@ -174,7 +144,6 @@ hr {
 
 # -------------------- 공통 함수 --------------------
 def safe_text(value, fallback="정보 없음"):
-    """HTML에 표시할 텍스트를 안전하게 변환."""
     if value is None or not str(value).strip():
         return fallback
     return html.escape(str(value))
@@ -188,6 +157,39 @@ def get_address(place):
     )
 
 
+def get_restaurant_photo(place):
+    """
+    카카오 로컬 API는 일반적으로 식당 사진을 제공하지 않음.
+    사진 API를 연결하기 전에는 임의의 사진 URL을 반환하지 않음.
+    """
+    return None
+
+
+def show_restaurant_photo(place, height=190):
+    """실제 사진 URL이 있을 때만 사진을 표시."""
+    photo_url = get_restaurant_photo(place)
+
+    if photo_url:
+        st.image(photo_url, use_container_width=True)
+    else:
+        name = safe_text(place.get("place_name", "이 식당"))
+
+        st.markdown(
+            f"""
+            <div class="photo-placeholder" style="min-height:{height}px">
+                <div style="font-size:2.5rem;">📷</div>
+                <div style="font-weight:700;margin-top:8px;">
+                    {name}
+                </div>
+                <div style="font-size:.85rem;margin-top:5px;">
+                    등록된 식당 사진을 찾을 수 없어요.
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
 def search_places(query, api_key):
     response = requests.get(
         "https://dapi.kakao.com/v2/local/search/keyword.json",
@@ -197,11 +199,12 @@ def search_places(query, api_key):
     )
 
     if response.status_code == 401:
-        raise ValueError("REST API 키가 올바른지 확인해 주세요.")
+        raise ValueError("카카오 REST API 키를 확인해 주세요.")
+
     if response.status_code == 403:
         raise ValueError("카카오 API 권한 또는 이용 설정을 확인해 주세요.")
-    response.raise_for_status()
 
+    response.raise_for_status()
     return response.json().get("documents", [])
 
 
@@ -229,7 +232,7 @@ with header_right:
 st.divider()
 
 
-# -------------------- API 키 --------------------
+# -------------------- 카카오 API 키 --------------------
 try:
     kakao_key = st.secrets["KAKAO_REST_API_KEY"]
 except Exception:
@@ -238,12 +241,12 @@ except Exception:
 if not kakao_key:
     st.error(
         "카카오 REST API 키가 설정되지 않았어요. "
-        "Streamlit Secrets에 KAKAO_REST_API_KEY를 등록해 주세요."
+        "Secrets에 KAKAO_REST_API_KEY를 등록해 주세요."
     )
     st.stop()
 
 
-# -------------------- 히어로 + 검색 --------------------
+# -------------------- 히어로 + 검색 영역 --------------------
 hero_col, search_col = st.columns([1.05, 1], gap="large")
 
 with hero_col:
@@ -288,6 +291,8 @@ with search_col:
 
         st.caption("지역과 음식 종류를 선택하고 검색해 주세요.")
 
+
+# -------------------- 검색 실행 --------------------
 if submitted:
     if not area.strip():
         st.warning("검색할 지역을 먼저 입력해 주세요.")
@@ -299,6 +304,7 @@ if submitted:
             with st.spinner("주변 맛집을 찾고 있어요..."):
                 found_places = search_places(query, kakao_key)
 
+            # 이전 결과를 새 검색 결과로 교체
             st.session_state["places"] = found_places
             st.session_state["searched_area"] = area.strip()
             st.session_state["searched_category"] = category
@@ -310,10 +316,10 @@ if submitted:
         except ValueError as error:
             st.error(str(error))
         except requests.RequestException:
-            st.error("네트워크 연결을 확인한 뒤 다시 검색해 주세요.")
+            st.error("네트워크 연결을 확인하고 다시 검색해 주세요.")
 
 
-# -------------------- 검색 결과 --------------------
+# -------------------- 검색 결과 표시 --------------------
 places = st.session_state.get("places", [])
 
 if places:
@@ -325,51 +331,47 @@ if places:
     )
 
     if selected is None:
-        selected = random.Random(
+        seed = (
             f"{today.isoformat()}|"
             f"{st.session_state.get('searched_area', '')}|"
             f"{st.session_state.get('searched_category', '')}"
-        ).choice(places)
+        )
+
+        selected = random.Random(seed).choice(places)
         st.session_state["selected_place_id"] = selected["id"]
 
     address = get_address(selected)
     place_url = selected.get("place_url", "")
 
-    # ---------- 7:3 레이아웃 ----------
+    # -------------------- 좌 7 : 우 3 --------------------
     left_col, right_col = st.columns([7, 3], gap="large")
 
-    # ==================== 왼쪽: 추천 + 지도 ====================
+    # ==================== 왼쪽 영역 ====================
     with left_col:
         st.markdown(
             '<div class="section-title">⭐ 오늘의 추천 맛집</div>',
             unsafe_allow_html=True,
         )
 
-        # 추천 카드
+        # 추천 식당의 실제 사진이 있을 때만 사진 표시
+        show_restaurant_photo(selected, height=190)
+
         st.markdown(
             f"""
             <div class="pick-card">
-                <img
-                    src="{FOOD_IMAGES[0]}"
-                    style="width:100%;height:190px;object-fit:cover;"
-                >
-                <div class="pick-inner">
-                    <div class="pick-tag">TODAY'S PICK · 오늘의 추천</div>
-                    <div class="pick-name">
-                        🍽️ {safe_text(selected.get("place_name"))}
-                    </div>
-                    <div class="muted">
-                        <span class="chip">맛집 추천</span>
-                        <span class="chip">
-                            {safe_text(st.session_state.get("searched_category", "전체"))}
-                        </span>
-                    </div>
-                    <div class="muted" style="margin-top:9px;">
-                        📍 {safe_text(address)}
-                    </div>
-                    <div class="muted" style="margin-top:5px;">
-                        {safe_text(selected.get("category_name", ""), "카테고리 정보 없음")}
-                    </div>
+                <div class="pick-tag">TODAY'S PICK · 오늘의 추천</div>
+                <div class="pick-name">
+                    🍽️ {safe_text(selected.get("place_name"))}
+                </div>
+                <span class="chip">맛집 추천</span>
+                <span class="chip">
+                    {safe_text(st.session_state.get("searched_category", "전체"))}
+                </span>
+                <div class="muted" style="margin-top:9px;">
+                    📍 {safe_text(address)}
+                </div>
+                <div class="muted" style="margin-top:5px;">
+                    {safe_text(selected.get("category_name", ""), "카테고리 정보 없음")}
                 </div>
             </div>
             """,
@@ -390,11 +392,11 @@ if places:
         )
 
         try:
-            center_lat = float(selected["y"])
-            center_lon = float(selected["x"])
-
             food_map = folium.Map(
-                location=[center_lat, center_lon],
+                location=[
+                    float(selected["y"]),
+                    float(selected["x"]),
+                ],
                 zoom_start=15,
                 control_scale=True,
                 tiles="OpenStreetMap",
@@ -409,9 +411,7 @@ if places:
                 url = place.get("place_url", "")
                 is_selected = place.get("id") == selected.get("id")
 
-                popup_html = (
-                    f"<b>{name}</b><br>{addr}<br>"
-                )
+                popup_html = f"<b>{name}</b><br>{addr}<br>"
 
                 if url:
                     safe_url = html.escape(url, quote=True)
@@ -422,9 +422,7 @@ if places:
 
                 folium.Marker(
                     location=[lat, lon],
-                    tooltip=(
-                        f"⭐ {name}" if is_selected else name
-                    ),
+                    tooltip="⭐ 오늘의 추천" if is_selected else name,
                     popup=folium.Popup(popup_html, max_width=260),
                     icon=folium.Icon(
                         color="orange" if is_selected else "red",
@@ -445,45 +443,22 @@ if places:
         except (KeyError, TypeError, ValueError):
             st.warning("지도에 표시할 위치 정보를 불러오지 못했어요.")
 
-    # ==================== 오른쪽: 상세 + 목록 ====================
+    # ==================== 오른쪽 영역 ====================
     with right_col:
         st.markdown(
             '<div class="section-title">📋 맛집 상세 정보</div>',
             unsafe_allow_html=True,
         )
 
-        # 이미지 슬라이더
-        if "photo_index" not in st.session_state:
-            st.session_state["photo_index"] = 0
-
-        image_col, arrow_col = st.columns([4, 1])
-
-        with image_col:
-            image_index = st.session_state["photo_index"] % len(FOOD_IMAGES)
-            st.image(
-                FOOD_IMAGES[image_index],
-                use_container_width=True,
-            )
-
-        with arrow_col:
-            st.write("")
-            if st.button("←", key="previous_photo", use_container_width=True):
-                st.session_state["photo_index"] = (
-                    st.session_state["photo_index"] - 1
-                ) % len(FOOD_IMAGES)
-                st.rerun()
-
-            if st.button("→", key="next_photo", use_container_width=True):
-                st.session_state["photo_index"] = (
-                    st.session_state["photo_index"] + 1
-                ) % len(FOOD_IMAGES)
-                st.rerun()
+        # 상세 정보 사진
+        show_restaurant_photo(selected, height=220)
 
         with st.container(border=True):
-            st.markdown(f"### {safe_text(selected.get('place_name'))}")
+            st.markdown(
+                f"### {safe_text(selected.get('place_name'))}"
+            )
 
-            # 평점, 리뷰 수는 카카오 Local 응답에 없어 임의로 만들지 않음
-            st.caption("⭐ 평점 및 리뷰 수는 제공된 데이터에서 확인할 수 없어요.")
+            st.caption("⭐ 평점 및 리뷰 수 정보 없음")
 
             st.markdown(
                 f'<span class="chip">'
@@ -493,11 +468,8 @@ if places:
             )
 
             st.write("📍", address)
-            st.write(
-                "☎️",
-                selected.get("phone") or "전화번호 정보 없음",
-            )
-            st.write("🕒", "영업시간 정보는 제공되지 않았어요.")
+            st.write("☎️", selected.get("phone") or "전화번호 정보 없음")
+            st.write("🕒", "영업시간 정보 없음")
 
             st.markdown("**식당 소개**")
             st.write(
@@ -524,33 +496,23 @@ if places:
 
         for index, place in enumerate(alternatives[:5]):
             with st.container(border=True):
-                thumb_col, detail_col = st.columns([1, 2])
+                show_restaurant_photo(place, height=120)
 
-                with thumb_col:
-                    st.image(
-                        FOOD_IMAGES[(index + 1) % len(FOOD_IMAGES)],
-                        use_container_width=True,
-                    )
+                st.markdown(
+                    f"**{safe_text(place.get('place_name'))}**"
+                )
+                st.caption(
+                    place.get("category_name") or "음식점"
+                )
+                st.caption("⭐ 평점 정보 없음")
 
-                with detail_col:
-                    st.markdown(
-                        f"**{safe_text(place.get('place_name'))}**"
-                    )
-                    st.caption(
-                        place.get("category_name") or "음식점"
-                    )
-                    st.caption("⭐ 평점 정보 없음")
-
-                    if st.button(
-                        "이 맛집 보기",
-                        key=f"select_{place.get('id')}",
-                        use_container_width=True,
-                    ):
-                        st.session_state["selected_place_id"] = place["id"]
-                        st.rerun()
-
-        if not alternatives:
-            st.info("다른 맛집을 보려면 다른 지역을 검색해 주세요.")
+                if st.button(
+                    "이 맛집 보기",
+                    key=f"select_{place.get('id')}",
+                    use_container_width=True,
+                ):
+                    st.session_state["selected_place_id"] = place["id"]
+                    st.rerun()
 
         if st.button(
             "🎲 다른 맛집 추천받기",
@@ -566,21 +528,22 @@ if places:
                 st.info("다른 지역을 검색해 보세요.")
 
 else:
-    # 검색 전 빈 화면
+    # 검색 전 화면
     st.markdown("")
+
     empty_left, empty_center, empty_right = st.columns([1, 2, 1])
 
     with empty_center:
         with st.container(border=True):
-            st.markdown(
-                "<div style='text-align:center;padding:22px'>"
-                "<div style='font-size:3.5rem'>🍲</div>"
-                "<h3>오늘은 어떤 맛집을 찾을까요?</h3>"
-                "<p style='color:#758184'>"
-                "위 검색창에 지역을 입력하면 추천 맛집과 지도가 나타나요."
-                "</p></div>",
-                unsafe_allow_html=True,
-            )
+            st.markdown("""
+            <div style="text-align:center;padding:22px">
+                <div style="font-size:3.5rem">🍲</div>
+                <h3>오늘은 어떤 맛집을 찾을까요?</h3>
+                <p style="color:#758184">
+                    위 검색창에 지역을 입력하면 추천 맛집과 지도가 나타나요.
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
 
 st.divider()
 st.caption("오늘 뭐 먹지? · 맛있는 하루를 위한 맛집 탐험 🍴")
